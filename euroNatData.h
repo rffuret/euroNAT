@@ -24,7 +24,7 @@ namespace euroNatData {
 		euroNatData(){}
 
 		static char * GetNatData(){
-            HttpWebRequest^ http = dynamic_cast< HttpWebRequest^ >( WebRequest::Create( "https://www.notams.jcs.mil/common/nat.html" ) );
+            HttpWebRequest^ http = dynamic_cast< HttpWebRequest^ >( WebRequest::Create( "https://notams.aim.faa.gov/nat.html" ) );
             http->AllowAutoRedirect = true;
             http->Method = "GET";
 
