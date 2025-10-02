@@ -16,8 +16,8 @@ euroNatPlugin::euroNatPlugin(void) :
 		EuroScopePlugIn::COMPATIBILITY_CODE, 
 		"euroNAT",
 		version_string,
-		"Portugal vACC ES euroNAT",
-		"test release"
+		"Portugal vACC",
+		"CC NC-SA"
 	)
 {
 	this->m_nats = NATData::NATWorkerData.m_pNats;
