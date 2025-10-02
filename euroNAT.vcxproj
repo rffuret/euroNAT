@@ -14,7 +14,7 @@
     <ProjectGuid>{E7210836-CD24-4907-A142-838241CCED37}</ProjectGuid>
     <RootNamespace>euroNAT</RootNamespace>
     <Keyword>MFCDLLProj</Keyword>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -23,7 +23,7 @@
     <CharacterSet>MultiByte</CharacterSet>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CLRSupport>false</CLRSupport>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>false</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -32,7 +32,7 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
     <UseOfMfc>Static</UseOfMfc>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CLRSupport>false</CLRSupport>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -81,10 +81,10 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <PostBuildEvent>
-      <Command>xcopy "$(OutDir)euroNAT.dll" "c:\Users\Nick\Documents\EuroScope\euroNAT\" /Y</Command>
+      <Command>xcopy "$(OutDir)euroNAT.dll" "S:\Software\Microsoft Visual Studio\repos\rffuret\euroNAT Build" /Y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
-      <Message>copy to docs</Message>
+      <Message>check the folder</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -122,7 +122,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <PostBuildEvent>
-      <Command>xcopy "$(OutDir)euroNAT.dll" "c:\Users\Nick\Documents\EuroScope\euroNAT\" /Y</Command>
+      <Command>xcopy "$(OutDir)euroNAT.dll" "S:\Software\Microsoft Visual Studio\repos\rffuret\euroNAT Build" /Y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>copy to docs</Message>

@@ -4,20 +4,20 @@
 #include "resource.h"
 
 // TODO: Update version number for new releases (format x.x.x)
-const double this_version_number = 1.3;
+const double this_version_number = 1.4;
 // INT_MAX if not in beta
 const unsigned int this_beta_version = 1;
-const char * version_string = "1.3b1";
+const char * version_string = "1.4b1";
 
-const CString pluginversion_url = "https://raw.githubusercontent.com/nickbotica/euroNAT/master/pluginversion.txt";
+const CString pluginversion_url = "https://raw.githubusercontent.com/rffuret/euroNAT/master/pluginversion.txt";
 
 euroNatPlugin::euroNatPlugin(void) : 
 	EuroScopePlugIn::CPlugIn( 
 		EuroScopePlugIn::COMPATIBILITY_CODE, 
 		"euroNAT",
 		version_string,
-		"Nick Botica (999991)",
-		"NYARTCC ES euroNAT"
+		"Portugal vACC ES euroNAT",
+		"test release"
 	)
 {
 	this->m_nats = NATData::NATWorkerData.m_pNats;
