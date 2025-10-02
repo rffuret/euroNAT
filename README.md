@@ -89,5 +89,5 @@ This screenshot shows the Options dialog for euroNAT, as well as the Concorde tr
 ## Authors
 Nov 2010 - Michael Freudeman  
 Nov 2014 - Merik Nanish  
-Aug 2017 - Nick Botica
+Aug 2017 - Nick Botica  
 Sep 2025 - rffuret
