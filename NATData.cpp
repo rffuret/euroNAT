@@ -261,8 +261,13 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 				lat.operator+=('.');
 				// If lat has additional decimal numbers.
 				while (isdigit(nat[cursor])) {
+					//dirty code to convert the half degree to decimal half
+					char current_digit = nat[cursor];
+					if (current_digit == '3') {
+						current_digit = '5';
+					}
 					lat = lat.operator+=(nat[cursor]);
-					cursor++;
+					cursor++;				
 				}
 				// Eat a slash
 				cursor++;

@@ -4,10 +4,10 @@
 #include "resource.h"
 
 // TODO: Update version number for new releases (format x.x.x)
-const double this_version_number = 1.4;
+const double this_version_number = 1.5;
 // INT_MAX if not in beta
 const unsigned int this_beta_version = 1;
-const char * version_string = "1.4b1";
+const char * version_string = "1.5b1";
 
 const CString pluginversion_url = "https://raw.githubusercontent.com/rffuret/euroNAT/master/pluginversion.txt";
 
@@ -156,24 +156,24 @@ void euroNatPlugin::CheckVersion(void) {
 		// if it's in beta
 		if (new_beta_version != INT_MAX) {
 			CString message;
-			message.Format("There is a new beta (v%g beta %d) avaliable at github.com/nickbotica/euroNAT/releases.", new_version_number, new_beta_version);
+			message.Format("There is a new beta (v%g beta %d) avaliable at github.com/rffuret/euroNAT/releases.", new_version_number, new_beta_version);
 			DisplayUserMessage("euroNAT", "Info", message, true, true, false, false, false);
 		}
 		else {
 			CString message;
-			message.Format("There is a new version (v%g) avaliable at github.com/nickbotica/euroNAT/releases.", new_version_number);
+			message.Format("There is a new version (v%g) avaliable at github.com/rffuret/euroNAT/releases.", new_version_number);
 			DisplayUserMessage("euroNAT", "Info", message, true, true, false, true, false);
 		}
 
 	} else if (this_version_number == new_version_number) {
 		if (this_beta_version < new_beta_version) {
 			CString message;
-			message.Format("There is a new beta (v%g beta %d) avaliable at github.com/nickbotica/euroNAT/releases.", new_version_number, new_beta_version);
+			message.Format("There is a new beta (v%g beta %d) avaliable at github.com/rffuret/euroNAT/releases.", new_version_number, new_beta_version);
 			DisplayUserMessage("euroNAT", "Info", message, true, true, false, false, false);
 
 		} else if (this_beta_version < INT_MAX && new_beta_version == 0) {
 			CString message;
-			message.Format("There is a new version (v%g) avaliable at github.com/nickbotica/euroNAT/releases.", new_version_number);
+			message.Format("There is a new version (v%g) avaliable at github.com/rffuret/euroNAT/releases.", new_version_number);
 			DisplayUserMessage("euroNAT", "Info", message, true, true, false, true, false);
 		}
 	
