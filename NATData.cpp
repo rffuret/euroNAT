@@ -12,7 +12,11 @@ NATData::NATWorkerCont NATData::NATWorkerData;
 NATData * NATData::LastInstance = NULL;
 CPlugIn* euroNatPlugin;
 
+//Use only one of the below links (if prod, always the first)
+//Remote FAA link to capture NAT Message
 CString natURL = "https://notams.aim.faa.gov/nat.html";
+//Local link to fake message for test purpose
+//CString natURL = "";
 
 NATData::NATData(void) {
 	this->m_nats = new NAT[MAXNATS];
@@ -545,5 +549,6 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 
 
 }
+
 
 
