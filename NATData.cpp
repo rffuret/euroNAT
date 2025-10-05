@@ -261,14 +261,19 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 				lat.operator+=('.');
 				// If lat has additional decimal numbers.
 				while (isdigit(nat[cursor])) {
-					//dirty code to convert the half degree to decimal half
-					char current_digit = nat[cursor];
-					if (current_digit == '3') {
-						current_digit = '5';
-					}
-					lat = lat.operator+=(nat[cursor]);
-					cursor++;				
+				    //dirty code to convert the half degree to decimal half
+				    char current_digit = nat[cursor];
+				    
+				    // Apply the substitution rule
+				    if (current_digit == '3') {
+				        current_digit = '5'; // Now current_digit might be '5'
+				    }
+    			    // FIX: Append the corrected 'current_digit'
+				    lat = lat.operator+=(current_digit); 
+				    
+				    cursor++;
 				}
+
 				// Eat a slash
 				cursor++;
 
@@ -540,4 +545,5 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 
 
 }
+
 
