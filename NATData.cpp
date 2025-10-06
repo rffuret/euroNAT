@@ -257,8 +257,10 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 			// LAT/LON --------------------------------------------------------
 			if (isdigit(nat[cursor])) {
-				// Lat and Long each have at least 2 digits, I've seen up to 4 (e.g 5730 would be 57.30).
+				// Lat and Long each have at least 2 digits, I've seen up to 4 
+				//(e.g 5730, which needs to be converted from base 60 to base 100, so it would be 57.50).
 				string lat;
+				chart lat_decimal = 'X'; // Variable to handle the decimal portion of the lat
 				lat = nat.Mid(cursor, 2);
 				cursor += 2;
 
@@ -267,9 +269,9 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 				while (isdigit(nat[cursor])) {
 				    //dirty code to convert the half degree to decimal half
 				    char current_digit = nat[cursor];
-				    
 				    // Apply the substitution rule
 				    if (current_digit == '3') {
+						lat_decimal = current_digit; //store the 3 for using in the name
 				        current_digit = '5'; // Now current_digit might be '5'
 				    }
     			    // FIX: Append the corrected 'current_digit'
@@ -309,6 +311,15 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 				// The Long Name
 				wp_name = lat.c_str();
+				//replacing the decimal portion dirty put on 5 back to 3
+				if  (lat_decimal == '3'){
+					// This finds the position of the corrected '5' (index 2)
+					int pos_of_5 = wp_name.Find('5', 2); 
+    				    // Replace the '5' with the original '3'
+					    if (pos_of_5 != -1) {
+					        wp_name.SetAt(pos_of_5, '3');
+					    }
+					}
 				wp_name.Append("N");
 				wp_name.Append(lon.c_str());
 				wp_name.Append("W");
@@ -549,6 +560,7 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 
 
 }
+
 
 
 
