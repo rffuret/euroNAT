@@ -311,6 +311,7 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 				// The Long Name
 				wp_name = lat.c_str();
+				wp_name.Replace(".", ""); // Remove the decimals.
 				//replacing the decimal portion dirty put on 5 back to 3
 				if  (lat_decimal == '3'){
 					// This finds the position of the corrected '5' (index 2)
@@ -322,9 +323,9 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 					}
 				wp_name.Append("N");
 				wp_name.Append(lon.c_str());
+				wp_name.Replace(".", ""); // Remove the decimals.
 				wp_name.Append("W");
-				// Remove the decimals.
-				wp_name.Replace(".", "");
+								
 				
 				dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = wp_name;
 
@@ -560,6 +561,7 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 
 
 }
+
 
 
 
