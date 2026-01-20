@@ -4,10 +4,10 @@
 #include "resource.h"
 
 // TODO: Update version number for new releases (format x.x.x)
-const double this_version_number = 1.5;
+const double this_version_number = 1.6;
 // INT_MAX if not in beta
-const unsigned int this_beta_version = 1;
-const char * version_string = "1.5b1";
+const unsigned int this_beta_version = 0;
+const char * version_string = "1.6";
 
 const CString pluginversion_url = "https://raw.githubusercontent.com/rffuret/euroNAT/master/pluginversion.txt";
 

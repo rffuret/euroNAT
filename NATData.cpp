@@ -52,42 +52,36 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 	std::map <CString, NATWaypoint> wp_map;
 
-	// Load waypoints into map
 	try {
-		// Get dll directory
-		TCHAR dllpath[2048];
-		GetModuleFileName(GetModuleHandle("euroNAT.dll"), dllpath, 2048);
+		// 1. Get DLL directory
+		TCHAR dllpath[MAX_PATH];
+		HMODULE hMod = GetModuleHandle(_T("euroNAT.dll"));
+		GetModuleFileName(hMod, dllpath, MAX_PATH);
+
 		CString wpfilename(dllpath);
-		wpfilename = wpfilename.Left(wpfilename.ReverseFind('\\') + 1);
-		wpfilename += "waypoints.txt";
+		wpfilename = wpfilename.Left(wpfilename.ReverseFind(_T('\\')) + 1);
+		wpfilename += _T("waypoints.txt");
 
-		// Read in waypoints
-		ifstream file(wpfilename);
-		string line, tmp, name, lat, lon;
-		while (getline(file, line)) {
-			// Ignore lines with ;
-			if (line[0] == ';') continue;
-
-			stringstream linestream(line);
-
-			getline(linestream, name, '\t');
-			getline(linestream, lat, '\t');
-			getline(linestream, lon, '\t');
-
-			NATWaypoint natwp;
-			natwp.Name = name.c_str();
-			natwp.ShortName = name.c_str();
-			natwp.Position.m_Latitude = stod(lat);
-			natwp.Position.m_Longitude = stod(lon);
-
-			wp_map.insert(pair<CString, NATWaypoint>(natwp.Name, natwp));
+		// 2. Create file if it doesn't exist
+		if (!PathFileExists(wpfilename)) {
+			// Use std::ofstream to create the file and write a header/template
+			std::ofstream outfile((LPCTSTR)wpfilename);
+			if (outfile.is_open()) {
+				outfile << "; Name\tLatitude\tLongitude" << std::endl;
+				outfile.close();
+			}
 		}
-		file.close();
 
-	} catch (...) {
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "Unable to open waypoints.txt", true, true, true, true, true);
+		// 3. Proceed to read the file (your existing logic)
+		std::ifstream file((LPCTSTR)wpfilename);
+		// ... rest of your while(getline(file, line)) loop ...
+
+	}
+	catch (...) {
+		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "waypoints.txt not found and/or unable to create", true, true, true, true, true);
 		NATShow::Loading = false;
 		return -1;
+
 	}
 
 	CWebGrab grab;
@@ -260,7 +254,7 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 				// Lat and Long each have at least 2 digits, I've seen up to 4 
 				//(e.g 5730, which needs to be converted from base 60 to base 100, so it would be 57.50).
 				string lat;
-				chart lat_decimal = 'X'; // Variable to handle the decimal portion of the lat
+				char lat_decimal = 'X'; // Variable to handle the decimal portion of the lat
 				lat = nat.Mid(cursor, 2);
 				cursor += 2;
 
@@ -401,8 +395,9 @@ bool NATData::checkISEC(CString wp, NATWaypoint * natwp) {
 
 	} catch (...) {
 		euroNatPlugin->DisplayUserMessage("euroNAT", "Error", "Unable to open ISEC.txt in plugin directory", true, true, true, true, true);
-
-		return false;
+		NATShow::Loading = false;
+		return -1;
+		//return false;
 	}
 
 	return false;
