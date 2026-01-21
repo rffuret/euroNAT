@@ -360,10 +360,8 @@ bool NATData::checkISEC(CString wp, NATWaypoint * natwp) {
 		ifstream file(isecfilename);
 		string line, name, lat, lon;
 		while (getline(file, line)) {
-			// Ignore lines with ;
 			if (line[0] == ';') continue;
 
-			// wp is found in ISEC.txt
 			if (line.find(wp) != string::npos) {
 				stringstream linestream(line);
 
@@ -371,25 +369,35 @@ bool NATData::checkISEC(CString wp, NATWaypoint * natwp) {
 				getline(linestream, lat, '\t');
 				getline(linestream, lon, '\t');
 
-				natwp->Name = name.c_str();
-				natwp->ShortName = name.c_str();
-				natwp->Position.m_Latitude = stod(lat);
-				natwp->Position.m_Longitude = stod(lon);
+				double latVal = stod(lat);
+				double lonVal = stod(lon);
 
-				// Add to waypoints.txt
-				CString wpfilename(dllpath);
-				wpfilename = wpfilename.Left(wpfilename.ReverseFind('\\') + 1);
-				wpfilename += "waypoints.txt";
-				
-				fstream wpfile(wpfilename, fstream::app);
+				bool latInRange = (latVal >= 30.0 && latVal <= 90.0);
+				bool lonInRange = (lonVal >= -70.0 && lonVal <= -1.0);
 
-				wpfile << name + "\t" + lat + "\t" + lon << endl;
+				if (latInRange && lonInRange) {
+					natwp->Name = name.c_str();
+					natwp->ShortName = name.c_str();
+					natwp->Position.m_Latitude = latVal;
+					natwp->Position.m_Longitude = lonVal;
 
-				wpfile.close();
+					CString wpfilename(dllpath);
+					wpfilename = wpfilename.Left(wpfilename.ReverseFind('\\') + 1);
+					wpfilename += "waypoints.txt";
 
-				return true;
+					fstream wpfile(wpfilename, fstream::app);
+					wpfile << name + "\t" + lat + "\t" + lon << endl;
+					wpfile.close();
+
+					return true;
+				}
+				else {
+					// Log why the waypoint was rejected
+					CString message;
+					message.Format("Found a %s in ISEC.txt but Coordinates are out of bounds - Skipping this one.", wp);
+					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);					
+				}
 			}
-			
 		}
 		file.close();
 
@@ -477,6 +485,7 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 	i++;
 
 	//SL
+	/*
 	dta->m_pNats[i].Concorde = true;
 	dta->m_pNats[i].Dir = Direction::NONE;
 	dta->m_pNats[i].Letter = 'L';
@@ -497,7 +506,7 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 	dta->m_pNats[i].Waypoints[4].Position.m_Longitude = -15;
 	dta->m_pNats[i].WPCount = 5;
 	i++;
-
+	*/
 	//SP
 	dta->m_pNats[i].Concorde = true;
 	dta->m_pNats[i].Dir = Direction::NONE;
