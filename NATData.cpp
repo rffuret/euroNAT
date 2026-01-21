@@ -1,7 +1,9 @@
 #include "StdAfx.h"
 #include "NATData.h"
 #include "NATShow.h"
+#include <windows.h>
 #include <regex>
+#include <iostream>
 #include <fstream>
 #include <string>
 #include <sstream>
@@ -17,6 +19,18 @@ CPlugIn* euroNatPlugin;
 CString natURL = "https://notams.aim.faa.gov/nat.html";
 //Local link to fake message for test purpose
 //CString natURL = "";
+
+static ULONGLONG GetFileWriteTime(LPCTSTR filePath)
+{
+	WIN32_FILE_ATTRIBUTE_DATA fileInfo;
+	if (!GetFileAttributesEx(filePath, GetFileExInfoStandard, &fileInfo))
+		return 0; // File not found or error
+
+	ULARGE_INTEGER ull;
+	ull.LowPart = fileInfo.ftLastWriteTime.dwLowDateTime;
+	ull.HighPart = fileInfo.ftLastWriteTime.dwHighDateTime;
+	return ull.QuadPart;
+}
 
 NATData::NATData(void) {
 	this->m_nats = new NAT[MAXNATS];
@@ -138,6 +152,39 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 		return -1;
 	}
 
+	//Ensure ISEC.txt exists in the .dll folder
+		TCHAR dllpath[2048];
+		GetModuleFileName(GetModuleHandle("euroNAT.dll"), dllpath, 2048);
+		CString pluginDir(dllpath);
+		pluginDir = pluginDir.Left(pluginDir.ReverseFind('\\') + 1);
+		CString isecPath = pluginDir + "ISEC.txt";
+
+		// SYNC FROM NAVDATA (Run once)
+		CString navDataPath = pluginDir;
+		for (int i = 0; i < 2; i++) {
+			navDataPath = navDataPath.Left(navDataPath.GetLength() - 1);
+			navDataPath = navDataPath.Left(navDataPath.ReverseFind('\\') + 1);
+		}
+		navDataPath += "NavData\\ISEC.txt";
+
+		bool sourceExists = (GetFileAttributes(navDataPath) != INVALID_FILE_ATTRIBUTES);
+		bool targetExists = (GetFileAttributes(isecPath) != INVALID_FILE_ATTRIBUTES);
+
+		if (sourceExists) {
+			if (!targetExists || (GetFileWriteTime(navDataPath) > GetFileWriteTime(isecPath))) {
+				if (CopyFile(navDataPath, isecPath, FALSE)) {
+					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "ISEC.txt updated from NavData.", true, false, false, false, false);
+				}
+			}
+		}
+		else {
+			euroNatPlugin->DisplayUserMessage("euroNAT", "Error", "ISEC.txt was not found. Check for correct instalation of the sectorpack", true, true, true, true, true);
+		}
+
+	// Global flag for the loop
+	bool isecExists = (GetFileAttributes(isecPath) != INVALID_FILE_ATTRIBUTES);
+
+
 	// CString to string for regex searching
 	string res((LPCTSTR) response);
 
@@ -215,37 +262,28 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 				CString wp = nat.Mid(cursor, 5);
 				cursor += 5;
 
-				if (wp_map.find(wp) == wp_map.end()) {
-					// Not found in the waypoints.txt map
-					CString message;
-					message.Format("Didn't find %s in waypoints.txt, looking in ISEC.txt", wp);
-					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, false, false, false, false);
-
-					// Look in ISEC.txt
+				if (wp_map.find(wp) != wp_map.end()) {
+					dta->m_pNats[NATcnt].Waypoints[waypoint_index] = wp_map.at(wp);
+					waypoint_index++;
+				}
+				else if (isecExists) {
 					NATWaypoint natwp;
 					if (checkISEC(wp, &natwp)) {
-						// Found in ISEC.txt
 						dta->m_pNats[NATcnt].Waypoints[waypoint_index] = natwp;
 						waypoint_index++;
-
 						wp_map.insert(pair<CString, NATWaypoint>(natwp.Name, natwp));
-						
-						CString message;
-						message.Format("Found %s in ISEC.txt, added it to waypoints.txt", wp);
-						euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, false, false, false, false);
-
-					} else {
-						CString message;
-						message.Format("Cannot find %s in ISEC.txt. If it's a valid waypoint, consider updating ISEC.txt in the euroNAT.dll directory.", wp);
-						euroNatPlugin->DisplayUserMessage("euroNAT", "Error", message, true, true, true, true, true);
 					}
-				} else {
-				// Found
-				dta->m_pNats[NATcnt].Waypoints[waypoint_index] = wp_map.at(wp);
-				
-				waypoint_index++;
+					else {
+						CString errorMsg;
+						errorMsg.Format("Cannot find %s in ISEC.txt (or out of bounds).", wp);
+						euroNatPlugin->DisplayUserMessage("euroNAT", "Error", errorMsg, true, true, true, true, true);
+					}
 				}
-				
+				else {
+					CString missingMsg;
+					missingMsg.Format("ISEC.txt missing - Cannot search for %s.", wp);
+					euroNatPlugin->DisplayUserMessage("euroNAT", "Error", missingMsg, true, true, true, true, true);
+				}
 				continue;
 			}
 
@@ -346,68 +384,46 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 	return 0;
 }
 
-bool NATData::checkISEC(CString wp, NATWaypoint * natwp) {
+bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
+	TCHAR dllpath[2048];
+	GetModuleFileName(GetModuleHandle("euroNAT.dll"), dllpath, 2048);
+	CString isecfilename(dllpath);
+	isecfilename = isecfilename.Left(isecfilename.ReverseFind('\\') + 1) + "ISEC.txt";
 
-	try {
-		// Get dll directory
-		TCHAR dllpath[2048];
-		GetModuleFileName(GetModuleHandle("euroNAT.dll"), dllpath, 2048);
-		CString isecfilename(dllpath);
-		isecfilename = isecfilename.Left(isecfilename.ReverseFind('\\') + 1);
-		isecfilename += "ISEC.txt";
+	ifstream file(isecfilename);
+	string line, name, lat, lon;
 
-		// Read in waypoints
-		ifstream file(isecfilename);
-		string line, name, lat, lon;
-		while (getline(file, line)) {
-			if (line[0] == ';') continue;
+	while (getline(file, line)) {
+		if (line.empty() || line[0] == ';') continue;
 
-			if (line.find(wp) != string::npos) {
-				stringstream linestream(line);
+		if (line.find(wp) != string::npos) {
+			stringstream linestream(line);
+			getline(linestream, name, '\t');
+			getline(linestream, lat, '\t');
+			getline(linestream, lon, '\t');
 
-				getline(linestream, name, '\t');
-				getline(linestream, lat, '\t');
-				getline(linestream, lon, '\t');
-
+			try {
 				double latVal = stod(lat);
 				double lonVal = stod(lon);
 
-				bool latInRange = (latVal >= 30.0 && latVal <= 90.0);
-				bool lonInRange = (lonVal >= -70.0 && lonVal <= -1.0);
-
-				if (latInRange && lonInRange) {
+				// North Atlantic Bounding Box
+				if ((latVal >= 30.0 && latVal <= 90.0) && (lonVal >= -70.0 && lonVal <= -1.0)) {
 					natwp->Name = name.c_str();
 					natwp->ShortName = name.c_str();
 					natwp->Position.m_Latitude = latVal;
 					natwp->Position.m_Longitude = lonVal;
 
-					CString wpfilename(dllpath);
-					wpfilename = wpfilename.Left(wpfilename.ReverseFind('\\') + 1);
-					wpfilename += "waypoints.txt";
-
-					fstream wpfile(wpfilename, fstream::app);
-					wpfile << name + "\t" + lat + "\t" + lon << endl;
+					// Append to waypoints.txt
+					fstream wpfile(isecfilename.Left(isecfilename.ReverseFind('\\') + 1) + "waypoints.txt", fstream::app);
+					wpfile << name << "\t" << lat << "\t" << lon << endl;
 					wpfile.close();
 
 					return true;
 				}
-				else {
-					// Log why the waypoint was rejected
-					CString message;
-					message.Format("Found a %s in ISEC.txt but Coordinates are out of bounds - Skipping this one.", wp);
-					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);					
-				}
 			}
+			catch (...) { continue; }
 		}
-		file.close();
-
-	} catch (...) {
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Error", "Unable to open ISEC.txt in plugin directory", true, true, true, true, true);
-		NATShow::Loading = false;
-		return -1;
-		//return false;
 	}
-
 	return false;
 }
 
@@ -565,6 +581,8 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 
 
 }
+
+
 
 
 
