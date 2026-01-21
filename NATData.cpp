@@ -1,7 +1,9 @@
 #include "StdAfx.h"
 #include "NATData.h"
 #include "NATShow.h"
+#include <windows.h>
 #include <regex>
+#include <iostream>
 #include <fstream>
 #include <string>
 #include <sstream>
@@ -352,10 +354,40 @@ bool NATData::checkISEC(CString wp, NATWaypoint * natwp) {
 		// Get dll directory
 		TCHAR dllpath[2048];
 		GetModuleFileName(GetModuleHandle("euroNAT.dll"), dllpath, 2048);
-		CString isecfilename(dllpath);
-		isecfilename = isecfilename.Left(isecfilename.ReverseFind('\\') + 1);
-		isecfilename += "ISEC.txt";
 
+		// 1. Establish the Plugin Folder (FIR\Plugins\EuroNat\)
+		CString pluginDir(dllpath);
+		pluginDir = pluginDir.Left(pluginDir.ReverseFind('\\') + 1);
+		CString isecfilename = pluginDir + "ISEC.txt";
+
+		// 2. Check if ISEC.txt exists in the Plugin Folder
+		if (GetFileAttributes(isecfilename) == INVALID_FILE_ATTRIBUTES) {
+
+			// 3. Construct NavData path (Go up two levels from EuroNat -> Plugins -> FIR)
+			CString navDataPath = pluginDir;
+			for (int i = 0; i < 2; i++) {
+				navDataPath = navDataPath.Left(navDataPath.GetLength() - 1); // remove trailing slash
+				navDataPath = navDataPath.Left(navDataPath.ReverseFind('\\') + 1);
+			}
+			navDataPath += "NavData\\ISEC.txt";
+
+			// 4. If found in NavData, copy it to the Plugin folder
+			if (GetFileAttributes(navDataPath) != INVALID_FILE_ATTRIBUTES) {
+				if (CopyFile(navDataPath, isecfilename, FALSE)) {
+					CString message;
+					message.Format("ISEC.txt copied from NavData to Plugin folder.", wp);
+					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);
+				}
+			}
+			else {
+				// Handle case where file is missing from both locations
+				CString message;
+				message.Format("ISEC.txt not found in EuroNat or NavData folders", wp);
+				euroNatPlugin->DisplayUserMessage("euroNAT", "Error", message, true, true, true, true, true);
+				return false;
+			}
+		}
+		// 5. Now proceed to read the file as before
 		// Read in waypoints
 		ifstream file(isecfilename);
 		string line, name, lat, lon;
@@ -395,7 +427,7 @@ bool NATData::checkISEC(CString wp, NATWaypoint * natwp) {
 					// Log why the waypoint was rejected
 					CString message;
 					message.Format("Found a %s in ISEC.txt but Coordinates are out of bounds - Skipping this one.", wp);
-					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);					
+					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, false, false, false, false);					
 				}
 			}
 		}
