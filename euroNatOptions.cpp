@@ -8,6 +8,8 @@
 #include "NATShow.h"
 #include "NATData.h"
 
+// 0 = FAA JSON (Default), 1 = VATSIM NatTrak
+int g_NatSource = 0;
 
 // euroNatOptions dialog
 
@@ -181,11 +183,13 @@ void euroNatOptions::OnBnClickedToggleSource()
 	CString currentText;
 	GetDlgItemText(IDC_TOGGLE_SOURCE, currentText);
 
-	// If it currently says FAA, flip it to VATSIM, and vice versa
 	if (currentText == _T("FAA")) {
-		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("NATTRAK"));
+		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("natTrak"));
+		g_NatSource = 1; // Switch state to VATSIM
 	}
 	else {
 		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("FAA"));
+		g_NatSource = 0; // Switch state to FAA
 	}
 }
+
