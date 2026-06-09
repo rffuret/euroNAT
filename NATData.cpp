@@ -9,8 +9,85 @@
 #include <sstream>
 #include <map>
 #include "json.hpp"
+#include <iomanip>
+#include <vector>
 using json = nlohmann::json;
 using namespace std;
+
+// Link the source state variable from your GUI options panel
+extern int g_NatSource;
+
+void LogToFile(const CString& level, const CString& message) {
+	HMODULE hMod = NULL;
+	if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+		GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		(LPCTSTR)&LogToFile, &hMod))
+	{
+		TCHAR dllpath[MAX_PATH];
+		GetModuleFileName(hMod, dllpath, MAX_PATH);
+		CString logPath(dllpath);
+		logPath = logPath.Left(logPath.ReverseFind(_T('\\')) + 1) + _T("euroNAT.log");
+
+		// This flag persists for the lifetime of the plugin session instance
+		static bool bSessionInitialized = false;
+
+		if (!bSessionInitialized) {
+			bSessionInitialized = true;
+
+			std::vector<std::string> lines;
+			std::ifstream inFile;
+			inFile.open((LPCTSTR)logPath); // FIXED: Separated declaration and open to block parsing errors
+			std::string line;
+			std::vector<size_t> sessionMarkers;
+
+			// Read the existing file and track where previous sessions started
+			if (inFile.is_open()) {
+				while (std::getline(inFile, line)) {
+					if (line.find("=== NEW SESSION ===") != std::string::npos) {
+						sessionMarkers.push_back(lines.size());
+					}
+					lines.push_back(line);
+				}
+				inFile.close();
+			}
+
+			// If we already have 3 or more historical sessions, truncate the oldest one.
+			if (sessionMarkers.size() >= 3) {
+				size_t keepFromLine = sessionMarkers[sessionMarkers.size() - 2];
+				std::ofstream outFile;
+				outFile.open((LPCTSTR)logPath, std::ios::trunc); // FIXED
+				if (outFile.is_open()) {
+					for (size_t i = keepFromLine; i < lines.size(); ++i) {
+						outFile << lines[i] << "\n";
+					}
+					outFile.close();
+				}
+			}
+
+			// Append a clear session separation block
+			std::ofstream logFile;
+			logFile.open((LPCTSTR)logPath, std::ios::app); // FIXED
+			if (logFile.is_open()) {
+				logFile << "\n==================== === NEW SESSION === ====================\n" << std::endl;
+				logFile.close();
+			}
+		}
+
+		// Write the actual log message entry
+		std::ofstream logFile;
+		logFile.open((LPCTSTR)logPath, std::ios::app); // FIXED
+		if (logFile.is_open()) {
+			SYSTEMTIME st;
+			GetLocalTime(&st);
+			char timestamp[32];
+			sprintf_s(timestamp, "[%04d-%02d-%02d %02d:%02d:%02d] ",
+				st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+			logFile << timestamp << "[" << (LPCTSTR)level << "] " << (LPCTSTR)message << std::endl;
+			logFile.close();
+		}
+	}
+}
 
 NATData::NATWorkerCont NATData::NATWorkerData;
 NATData * NATData::LastInstance = NULL;
@@ -66,50 +143,87 @@ void NATData::SetPlugin(CPlugIn* plugin) {
 UINT NATData::FetchDataWorker(LPVOID pvar) {
 	NATWorkerCont* dta = &NATData::NATWorkerData;
 
+	// FORCE A LOG ENTRY HERE TO VERIFY LOG.TXT WRITING PERMISSIONS BEFORE PROCEEDING WITH ANY OTHER OPERATIONS
+	//LogToFile("INFO", "euroNAT.dll loaded successfully.");
+
 	std::map <CString, NATWaypoint> wp_map;
+	bool missingFixesDetected = false; // Scope lifted here: Available to both engines and the wrap-up
 
-	try {
-		// 1. Get DLL directory
-		TCHAR dllpath[MAX_PATH];
-		HMODULE hMod = GetModuleHandle(_T("euroNAT.dll"));
-		GetModuleFileName(hMod, dllpath, MAX_PATH);
+	// 1. Get DLL directory
+	TCHAR dllpath[MAX_PATH];
+	HMODULE hMod = GetModuleHandle(_T("euroNAT.dll"));
+	GetModuleFileName(hMod, dllpath, MAX_PATH);
 
-		CString wpfilename(dllpath);
-		wpfilename = wpfilename.Left(wpfilename.ReverseFind(_T('\\')) + 1);
-		wpfilename += _T("waypoints.txt");
+	CString wpfilename(dllpath);
+	wpfilename = wpfilename.Left(wpfilename.ReverseFind(_T('\\')) + 1);
+	wpfilename += _T("waypoints.txt");
 
-		// 2. Create file if it doesn't exist
-		if (!PathFileExists(wpfilename)) {
-			// Use std::ofstream to create the file and write a header/template
-			std::ofstream outfile((LPCTSTR)wpfilename);
-			if (outfile.is_open()) {
-				outfile << "; Name\tLatitude\tLongitude" << std::endl;
-				outfile.close();
+	// 2. Create file if it doesn't exist
+	if (!PathFileExists(wpfilename)) {
+		std::ofstream outfile; // Declare first
+		outfile.open((LPCTSTR)wpfilename); // Open second (Safely avoids most vexing parse)
+
+		if (!outfile.is_open()) {
+			LogToFile("ERROR", "Unable to create waypoints.txt. Check folder permissions.");
+			euroNatPlugin->DisplayUserMessage("euroNAT", "Error", "Unable to create waypoints.txt. Check euroNAT.log.", true, true, false, false, false);
+			NATShow::Loading = false;
+			return -1;
+		}
+		outfile << "; Name\tLatitude\tLongitude" << std::endl;
+		outfile.close();
+	}
+
+	// 3. Proceed to read the file
+	std::ifstream file;
+	file.open((LPCTSTR)wpfilename);
+	if (file.is_open()) {
+		std::string wpLine;
+		while (std::getline(file, wpLine)) {
+			// Skip comments or empty lines
+			if (wpLine.empty() || wpLine[0] == ';') continue;
+
+			std::stringstream ss(wpLine);
+			std::string wpName, wpLat, wpLon;
+
+			// Parse the tab-separated format: Name \t Latitude \t Longitude
+			if (std::getline(ss, wpName, '\t') &&
+				std::getline(ss, wpLat, '\t') &&
+				std::getline(ss, wpLon, '\t'))
+			{
+				try {
+					NATWaypoint cachedWp;
+					cachedWp.Name = wpName.c_str();
+					cachedWp.ShortName = wpName.c_str();
+					cachedWp.Position.m_Latitude = std::stod(wpLat);
+					cachedWp.Position.m_Longitude = std::stod(wpLon);
+
+					// Cache it into our map using its name as the lookup key
+					wp_map[cachedWp.Name] = cachedWp;
+				}
+				catch (...) {
+					// Malformed line safety check
+					continue;
+				}
 			}
 		}
-
-		// 3. Proceed to read the file (your existing logic)
-		std::ifstream file((LPCTSTR)wpfilename);
-		// ... rest of your while(getline(file, line)) loop ...
-
+		file.close();
 	}
-	catch (...) {
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "waypoints.txt not found and/or unable to create", true, true, true, true, true);
-		NATShow::Loading = false;
-		return -1;
 
+	// Determine destination target based on your GUI selection
+	CString targetURL = natURL;
+	if (g_NatSource == 1) {
+		targetURL = "https://nattrak.vatsim.net/api/v2/tracks";
 	}
+	
 
 	CWebGrab grab;
 	CString response;
 	int NATcnt = 0;
 
-	if (!grab.GetFile(natURL, response)) {
-		CString errorMessage =  grab.GetErrorMessage();
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Error", errorMessage, true, true, true, true, true);
-		CString message;
-		message.Format("Couldn't open %s", natURL);
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Error", message, true, true, true, true, true);
+	if (!grab.GetFile(targetURL, response)) {
+		CString errorMessage = grab.GetErrorMessage();
+		LogToFile("ERROR", "Network fetch failed. URL: " + targetURL + " | Reason: " + errorMessage);
+		euroNatPlugin->DisplayUserMessage("euroNAT", "Fetch Error", "Failed to download NAT data. Check euroNAT.log for details.", true, true, false, false, false);
 		NATShow::Loading = false;
 		return -1;
 	}
@@ -117,83 +231,201 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 	// Check for 404
 	if (grab.GetRawHeaders().Find("404") >= 0) {
 		CString message;
-		message.Format("Received '404: Not Found' at %s.", natURL);
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);
+		message.Format("Received '404: Not Found' at %s.", (LPCTSTR)targetURL);
+		LogToFile("ERROR", message);
+		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "Received '404: Not Found' from data server. Details logged.", true, true, false, false, false);
 		NATShow::Loading = false;
 		return -1;
 	}
 	grab.Close();
 
-	// -------------------------------------------------------------------------
-	// NEW JSON WRAPPER EXTRACTOR
-	// -------------------------------------------------------------------------
-	std::string jsonRawSource((LPCTSTR)response);
-	std::string stitchedLegacyText = "";
 
-	try {
-		auto parsedJson = json::parse(jsonRawSource);
+	if (g_NatSource == 1) {
+		LogToFile("INFO", "Loading natTrak Data");
+		// =========================================================================
+		// ENGINE A: VATSIM NATTRAK DIRECT NATIVE JSON PARSING
+		// =========================================================================
+		std::string jsonRawSource((LPCTSTR)response);
+		try {
+			auto parsedJson = json::parse(jsonRawSource);
 
-		if (parsedJson.is_array()) {
-			// Iterate through all parts (Part 1, Part 2, etc.) and append text
-			for (const auto& part : parsedJson) {
-				if (part.contains("condition_message") && part["condition_message"].is_string()) {
-					stitchedLegacyText += part["condition_message"].get<std::string>();
-					stitchedLegacyText += "\r\n"; // Ensure clean spacing between parts
+			if (!parsedJson.is_array()) {
+				NATShow::Loading = false;
+				return -1;
+			}
+
+			CString pluginDir(dllpath);
+			pluginDir = pluginDir.Left(pluginDir.ReverseFind('\\') + 1);
+			CString isecPath = pluginDir + "ISEC.txt";
+			bool isecExists = (GetFileAttributes(isecPath) != INVALID_FILE_ATTRIBUTES);
+			if (!isecExists) {
+				LogToFile("ERROR", "ISEC.txt is missing from the plugin directory! Named intersections cannot be resolved.");
+			}
+
+			for (const auto& trackItem : parsedJson) {
+				if (NATcnt >= MAXNATS) break;
+
+				std::string idStr = trackItem.value("identifier", "");
+				if (idStr.empty()) continue;
+
+				int tmi = 0;
+				std::string validFrom = trackItem.value("valid_from", "");
+				if (validFrom.length() >= 10 && validFrom[4] == '-' && validFrom[7] == '-') {
+					try {
+						int year = std::stoi(validFrom.substr(0, 4));
+						int month = std::stoi(validFrom.substr(5, 2));
+						int day = std::stoi(validFrom.substr(8, 2));
+						int daysBeforeMonth[] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+						if (month >= 1 && month <= 12) {
+							tmi = daysBeforeMonth[month - 1] + day;
+							if (month > 2 && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))) {
+								tmi += 1;
+							}
+						}
+					}
+					catch (...) { tmi = 0; }
+				}
+
+				int concordeVal = trackItem.value("concorde", 0);
+				dta->m_pNats[NATcnt].Concorde = (concordeVal != 0);
+				dta->m_pNats[NATcnt].TMI = tmi;
+				dta->m_pNats[NATcnt].Letter = idStr[0];
+
+				std::string direction = trackItem.value("direction", "west");
+				dta->m_pNats[NATcnt].Dir = (direction == "east" || direction == "EAST") ? EAST : WEST;
+
+				for (int i = 0; i <= 20; i++) dta->m_pNats[NATcnt].FlightLevels[i] = 0;
+
+				if (trackItem.contains("flight_levels") && trackItem["flight_levels"].is_array()) {
+					int flCounter = 0;
+					for (const auto& lvl : trackItem["flight_levels"]) {
+						if (flCounter >= FLCOUNT) break;
+						dta->m_pNats[NATcnt].FlightLevels[flCounter++] = lvl.get<int>() / 100;
+					}
+				}
+
+				int waypoint_index = 0;
+				std::string routeStr = trackItem.value("last_routeing", "");
+				std::stringstream ss(routeStr);
+				std::string token;
+
+				while (ss >> token) {
+					if (waypoint_index >= 30) break;
+					CString wp(token.c_str());
+					wp.Trim();
+					if (wp.IsEmpty()) continue;
+
+					int slashIdx = wp.Find('/');
+					if (slashIdx >= 0) {
+						CString latStr = wp.Left(slashIdx);
+						CString lonStr = wp.Mid(slashIdx + 1);
+
+						double latitude = _ttof(latStr);
+						double longitude = _ttof(lonStr);
+						longitude = -longitude;
+
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Latitude = latitude;
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Longitude = longitude;
+
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].ShortName = lonStr + _T("W");
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = latStr + _T("N") + lonStr + _T("W");
+						waypoint_index++;
+					}
+					else {
+						// This is a standard named entry/exit intersection fix like "BALIX"
+						if (wp_map.find(wp) != wp_map.end()) {
+							dta->m_pNats[NATcnt].Waypoints[waypoint_index] = wp_map.at(wp);
+							waypoint_index++;
+						}
+						else if (isecExists && checkISEC(wp, &dta->m_pNats[NATcnt].Waypoints[waypoint_index])) {
+							wp_map.insert(pair<CString, NATWaypoint>(dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name, dta->m_pNats[NATcnt].Waypoints[waypoint_index]));
+							waypoint_index++;
+						}
+						else {
+							// ENGINE A ADDITION: Log missing named fixes safely here
+							CString errorMsg;
+							errorMsg.Format("VATSIM Track %c: Fix %s not found in ISEC.txt or out of bounds.", dta->m_pNats[NATcnt].Letter, (LPCTSTR)wp);
+							LogToFile("WARNING", errorMsg);
+							missingFixesDetected = true;
+						}
+					}
+				}
+				dta->m_pNats[NATcnt].WPCount = waypoint_index;
+				NATcnt++;
+			}
+		}
+		catch (const std::exception& e) {
+			CString errMessage;
+			errMessage.Format("VATSIM Parsing Exception: %s", e.what());
+			LogToFile("EXCEPTION", errMessage);
+			euroNatPlugin->DisplayUserMessage("euroNAT", "Data Error", "Error processing VATSIM data feed. Details logged.", true, true, false, false, false);
+			NATShow::Loading = false;
+			return -1;
+		}
+
+	}
+	else {
+		// =========================================================================
+		// ENGINE B: ORIGINAL FAA TEXT REGEX PARSER
+		// =========================================================================
+		std::string jsonRawSource((LPCTSTR)response);
+		std::string stitchedLegacyText = "";
+
+		LogToFile("INFO", "Loading FAA Data");
+
+		try {
+			auto parsedJson = json::parse(jsonRawSource);
+			if (parsedJson.is_array()) {
+				for (const auto& part : parsedJson) {
+					if (part.contains("condition_message") && part["condition_message"].is_string()) {
+						stitchedLegacyText += part["condition_message"].get<std::string>();
+						stitchedLegacyText += "\r\n";
+					}
 				}
 			}
 		}
-	}
-	catch (const std::exception& e) {
-		CString errMessage;
-		errMessage.Format("JSON Parsing Exception: %s", e.what());
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Error", errMessage, true, true, true, true, true);
-		NATShow::Loading = false;
-		return -1;
-	}
-
-	// Re-assign our clean, stitched text back into the original MFC response variable
-	response = stitchedLegacyText.c_str();
-	response.Replace("\r", "");
-	// -------------------------------------------------------------------------
-
-	// Check for 'NO DATA IS ACTIVE'
-	if (response.Find("NO DATA IS ACTIVE") >= 0) {
-		CString message;
-		message.Format("No NAT Data is active, %s", natURL);
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);
-		NATShow::Loading = false;
-		return -1;
-	}
-
-	// TMI Could be 1 or 3 digits (day of the year)
-	int tmi = -1;
-	int tmi_cursor = response.Find("TMI IS ");
-	if (tmi_cursor >= 0) {
-		CString tmi_string = response.Mid(tmi_cursor + 7, 3);
-
-		string tmi_temp;
-		int i = 0;
-		while (isdigit(tmi_string[i])) {
-			tmi_temp += tmi_string[i];
-			i++;
+		catch (const std::exception& e) {
+			CString errMessage;
+			errMessage.Format("JSON Parsing Exception: %s", e.what());
+			LogToFile("EXCEPTION", errMessage);
+			euroNatPlugin->DisplayUserMessage("euroNAT", "Error", "Error parsing legacy FAA payload wrap. Details logged.", true, true, false, false, false);
+			NATShow::Loading = false;
+			return -1;
 		}
-		tmi = stoi(tmi_temp);
-	} else {
-		CString message;
-		message.Format("NAT Data not in expected format, %s", natURL);
-		euroNatPlugin->DisplayUserMessage("euroNAT", "Info", message, true, true, true, true, true);
-		NATShow::Loading = false;
-		return -1;
-	}
 
-	//Ensure ISEC.txt exists in the .dll folder
-		TCHAR dllpath[2048];
-		GetModuleFileName(GetModuleHandle("euroNAT.dll"), dllpath, 2048);
+		response = stitchedLegacyText.c_str();
+		response.Replace("\r", "");
+
+		if (response.Find("NO DATA IS ACTIVE") >= 0) {
+			LogToFile("INFO", "FAA source reported: NO DATA IS ACTIVE.");
+			euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "No FAA NAT Data is active currently.", true, true, false, false, false);
+			NATShow::Loading = false;
+			return -1;
+		}
+
+		int tmi = -1;
+		int tmi_cursor = response.Find("TMI IS ");
+		if (tmi_cursor >= 0) {
+			CString tmi_string = response.Mid(tmi_cursor + 7, 3);
+			string tmi_temp;
+			int i = 0;
+			while (isdigit(tmi_string[i])) {
+				tmi_temp += tmi_string[i];
+				i++;
+			}
+			tmi = stoi(tmi_temp);
+		}
+		else {
+			LogToFile("ERROR", "FAA payload structurally malformed; 'TMI IS' token not found.");
+			euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "FAA data format unexpected. Details logged.", true, true, false, false, false);
+			NATShow::Loading = false;
+			return -1;
+		}
+
 		CString pluginDir(dllpath);
 		pluginDir = pluginDir.Left(pluginDir.ReverseFind('\\') + 1);
 		CString isecPath = pluginDir + "ISEC.txt";
 
-		// SYNC FROM NAVDATA (Run once)
 		CString navDataPath = pluginDir;
 		for (int i = 0; i < 2; i++) {
 			navDataPath = navDataPath.Left(navDataPath.GetLength() - 1);
@@ -206,217 +438,173 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 		if (sourceExists) {
 			if (!targetExists || (GetFileWriteTime(navDataPath) > GetFileWriteTime(isecPath))) {
-				if (CopyFile(navDataPath, isecPath, FALSE)) {
-					euroNatPlugin->DisplayUserMessage("euroNAT", "Info", "ISEC.txt updated from NavData.", true, false, false, false, false);
-				}
-			}
-		}
-		else {
-			euroNatPlugin->DisplayUserMessage("euroNAT", "Error", "ISEC.txt was not found. Check for correct instalation of the sectorpack", true, true, true, true, true);
-		}
-
-	// Global flag for the loop
-	bool isecExists = (GetFileAttributes(isecPath) != INVALID_FILE_ATTRIBUTES);
-
-
-	// CString to string for regex searching
-	string res((LPCTSTR) response);
-
-	// TODO: Optimise?
-	const regex track_regex("([a-zA-Z]\\s+)([a-zA-Z]{5}\\s+)*(\\d{2,}\\/\\d{2,}\\s+)*(\\d{2,}\\/\\d{2,})*([a-zA-Z]{5}\\s+)*([a-zA-Z]{5})*\\nEAST LVLS .+\\nWEST LVLS .+\\n");
-
-	// Find all the matches
-	auto words_begin = sregex_iterator(res.begin(), res.end(), track_regex);
-	auto words_end = sregex_iterator();
-
-	// Loop through every match (NAT data string)
-	for (sregex_iterator iter = words_begin; iter != words_end; ++iter) {
-		smatch match = *iter;
-		CString nat = match.str().c_str();
-
-		// Make a NAT
-		dta->m_pNats[NATcnt].Concorde = false;
-		dta->m_pNats[NATcnt].TMI = tmi;
-		dta->m_pNats[NATcnt].Letter = nat[0];
-
-		// Tracks the index for the next waypoint to add.
-		int waypoint_index = 0;
-
-		// Parse one NAT string, build and add one NAT.
-		// Reset the cursor each loop
-		int cursor = 2;
-		while (cursor < nat.GetLength()) {
-			// SPACE ----------------------------------------------------------
-			if (nat[cursor] == ' ') { cursor++; continue; }
-
-			// NEW LINE \n EAST OR WEST FL ------------------------------------
-			if (nat[cursor] == '\n') {
-				cursor++;
-				// Check if there's more string
-				if (cursor >= nat.GetLength()) continue;
-
-				CString dir = nat.Mid(cursor, 4);
-				// Skip 'EAST LVLS ' / 'WEST LVLS '
-				cursor += 10;
-
-				// 'NIL'
-				if (nat[cursor] == 'N') {
-					cursor += 3;
-					continue;
-
-				} else if (isdigit(nat[cursor])) {
-					int flight_levels[FLCOUNT] = {0};
-					int i = 0;
-
-					while (nat[cursor] != '\n') {
-						
-						int flight_level = atoi(nat.Mid(cursor, 3));
-						flight_levels[i] = flight_level;
-						cursor += 3;
-
-						if (nat[cursor] == ' ') cursor++;
-
-						i++;
-						continue;
-					}
-
-					Direction dir_enum;
-					(dir == "EAST") ? dir_enum = EAST : dir_enum = WEST;
-					dta->m_pNats[NATcnt].Dir = dir_enum;
-
-					for (int i = 0; i <= 20; i++) {
-						dta->m_pNats[NATcnt].FlightLevels[i] = flight_levels[i];
-					}
-				}
-
-			}
-
-			// WAYPOINT -------------------------------------------------------
-			if (isalpha(nat[cursor])) {
-				CString wp = nat.Mid(cursor, 5);
-				cursor += 5;
-
-				if (wp_map.find(wp) != wp_map.end()) {
-					dta->m_pNats[NATcnt].Waypoints[waypoint_index] = wp_map.at(wp);
-					waypoint_index++;
-				}
-				else if (isecExists) {
-					NATWaypoint natwp;
-					if (checkISEC(wp, &natwp)) {
-						dta->m_pNats[NATcnt].Waypoints[waypoint_index] = natwp;
-						waypoint_index++;
-						wp_map.insert(pair<CString, NATWaypoint>(natwp.Name, natwp));
-					}
-					else {
-						CString errorMsg;
-						errorMsg.Format("Cannot find %s in ISEC.txt (or out of bounds).", wp);
-						euroNatPlugin->DisplayUserMessage("euroNAT", "Error", errorMsg, true, true, true, true, true);
-					}
+				if (!CopyFile(navDataPath, isecPath, FALSE)) {
+					LogToFile("WARNING", "Found newer local NavData\\ISEC.txt but failed to copy it to the plugin directory.");
 				}
 				else {
-					CString missingMsg;
-					missingMsg.Format("ISEC.txt missing - Cannot search for %s.", wp);
-					euroNatPlugin->DisplayUserMessage("euroNAT", "Error", missingMsg, true, true, true, true, true);
+					LogToFile("INFO", "ISEC.txt successfully updated from local NavData directory.");
 				}
-				continue;
 			}
-
-			// LAT/LON --------------------------------------------------------
-			if (isdigit(nat[cursor])) {
-				// Lat and Long each have at least 2 digits, I've seen up to 4 
-				//(e.g 5730, which needs to be converted from base 60 to base 100, so it would be 57.50).
-				string lat;
-				char lat_decimal = 'X'; // Variable to handle the decimal portion of the lat
-				lat = nat.Mid(cursor, 2);
-				cursor += 2;
-
-				lat.operator+=('.');
-				// If lat has additional decimal numbers.
-				while (isdigit(nat[cursor])) {
-				    //dirty code to convert the half degree to decimal half
-				    char current_digit = nat[cursor];
-				    // Apply the substitution rule
-				    if (current_digit == '3') {
-						lat_decimal = current_digit; //store the 3 for using in the name
-				        current_digit = '5'; // Now current_digit might be '5'
-				    }
-    			    // FIX: Append the corrected 'current_digit'
-				    lat = lat.operator+=(current_digit); 
-				    
-				    cursor++;
-				}
-
-				// Eat a slash
-				cursor++;
-
-				string lon;
-				lon = nat.Mid(cursor, 2);
-				cursor += 2;
-				lon.operator+=('.');
-				// If lon has additional decimal numbers.
-				while (isdigit(nat[cursor])) {
-					lon = lon.operator+=(nat[cursor]);
-					cursor++;
-				}
-				// String to Double
-				double latitude = stod(lat);
-				double longitude = stod(lon);
-				// Longitudes are West, so negative sign is applied.
-				longitude = longitude / -1;
-
-				dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Latitude = latitude;
-				dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Longitude = longitude;
-
-				// The Short Name
-				CString wp_name = lon.c_str();
-				wp_name.Append("W");
-				// Remove the decimal.
-				wp_name.Replace(".", "");
-				
-				dta->m_pNats[NATcnt].Waypoints[waypoint_index].ShortName = wp_name;
-
-				// The Long Name
-				wp_name = lat.c_str();
-				wp_name.Replace(".", ""); // Remove the decimals.
-				//replacing the decimal portion dirty put on 5 back to 3
-				if  (lat_decimal == '3'){
-					// This finds the position of the corrected '5' (index 2)
-					int pos_of_5 = wp_name.Find('5', 2); 
-    				    // Replace the '5' with the original '3'
-					    if (pos_of_5 != -1) {
-					        wp_name.SetAt(pos_of_5, '3');
-					    }
-					}
-				wp_name.Append("N");
-				wp_name.Append(lon.c_str());
-				wp_name.Replace(".", ""); // Remove the decimals.
-				wp_name.Append("W");
-								
-				
-				dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = wp_name;
-
-				// Increment for next waypoint to add
-				waypoint_index++;
-
-				continue;
-			}
-
 		}
-		// Add total number of waypoints
-		dta->m_pNats[NATcnt].WPCount = waypoint_index;
 
-		NATcnt++;
+		bool isecExists = (GetFileAttributes(isecPath) != INVALID_FILE_ATTRIBUTES);
+		if (!isecExists) {
+			LogToFile("ERROR", "ISEC.txt is missing from the plugin directory! Named fix extraction will fail.");
+		}
+		string res((LPCTSTR)response);
+		const regex track_regex("([a-zA-Z]\\s+)([a-zA-Z]{5}\\s+)*(\\d{2,}\\/\\d{2,}\\s+)*(\\d{2,}\\/\\d{2,})*([a-zA-Z]{5}\\s+)*([a-zA-Z]{5})*\\nEAST LVLS .+\\nWEST LVLS .+\\n");
 
-		//End of each NAT loop
+		auto words_begin = sregex_iterator(res.begin(), res.end(), track_regex);
+		auto words_end = sregex_iterator();
+
+		for (sregex_iterator iter = words_begin; iter != words_end; ++iter) {
+			smatch match = *iter;
+			CString nat = match.str().c_str();
+
+			dta->m_pNats[NATcnt].Concorde = false;
+			dta->m_pNats[NATcnt].TMI = tmi;
+			dta->m_pNats[NATcnt].Letter = nat[0];
+
+			int waypoint_index = 0;
+			int cursor = 2;
+			while (cursor < nat.GetLength()) {
+				if (nat[cursor] == ' ') { cursor++; continue; }
+
+				if (nat[cursor] == '\n') {
+					cursor++;
+					if (cursor >= nat.GetLength()) continue;
+
+					CString dir = nat.Mid(cursor, 4);
+					cursor += 10;
+
+					if (nat[cursor] == 'N') {
+						cursor += 3;
+						continue;
+					}
+					else if (isdigit(nat[cursor])) {
+						int flight_levels[FLCOUNT] = { 0 };
+						int flCount = 0; 
+
+						while (nat[cursor] != '\n') {
+							int flight_level = atoi(nat.Mid(cursor, 3));
+							flight_levels[flCount] = flight_level;
+							cursor += 3;
+							if (nat[cursor] == ' ') cursor++;
+							flCount++;
+							continue;
+						}
+
+						Direction dir_enum;
+						(dir == "EAST") ? dir_enum = EAST : dir_enum = WEST;
+						dta->m_pNats[NATcnt].Dir = dir_enum;
+
+						for (int i = 0; i <= 20; i++) {
+							dta->m_pNats[NATcnt].FlightLevels[i] = flight_levels[i];
+						}
+					}
+				}
+
+				if (isalpha(nat[cursor])) {
+					CString wp = nat.Mid(cursor, 5);
+					cursor += 5;
+
+					if (wp_map.find(wp) != wp_map.end()) {
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index] = wp_map.at(wp);
+						waypoint_index++;
+					}
+					else if (isecExists) {
+						NATWaypoint natwp;
+						if (checkISEC(wp, &natwp)) {
+							dta->m_pNats[NATcnt].Waypoints[waypoint_index] = natwp;
+							waypoint_index++;
+							wp_map.insert(pair<CString, NATWaypoint>(natwp.Name, natwp));
+						}
+						else {
+							// ENGINE B FIXED: Squelch loop popup, pipe to file instead
+							CString errorMsg;
+							errorMsg.Format("FAA Track %c: Fix %s not found in ISEC.txt or out of bounds.", dta->m_pNats[NATcnt].Letter, (LPCTSTR)wp);
+							LogToFile("WARNING", errorMsg);
+							missingFixesDetected = true;
+						}
+					}
+					continue;
+				}
+
+				if (isdigit(nat[cursor])) {
+					string lat;
+					char lat_decimal = 'X';
+					lat = nat.Mid(cursor, 2);
+					cursor += 2;
+					lat.operator+=('.');
+
+					while (isdigit(nat[cursor])) {
+						char current_digit = nat[cursor];
+						if (current_digit == '3') {
+							lat_decimal = current_digit;
+							current_digit = '5';
+						}
+						lat = lat.operator+=(current_digit);
+						cursor++;
+					}
+
+					cursor++;
+					string lon;
+					lon = nat.Mid(cursor, 2);
+					cursor += 2;
+					lon.operator+=('.');
+					while (isdigit(nat[cursor])) {
+						lon = lon.operator+=(nat[cursor]);
+						cursor++;
+					}
+
+					double latitude = stod(lat);
+					double longitude = stod(lon);
+					longitude = longitude / -1;
+
+					dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Latitude = latitude;
+					dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Longitude = longitude;
+
+					CString wp_name = lon.c_str();
+					wp_name.Append("W");
+					wp_name.Replace(".", "");
+					dta->m_pNats[NATcnt].Waypoints[waypoint_index].ShortName = wp_name;
+
+					wp_name = lat.c_str();
+					wp_name.Replace(".", "");
+					if (lat_decimal == '3') {
+						int pos_of_5 = wp_name.Find('5', 2);
+						if (pos_of_5 != -1) {
+							wp_name.SetAt(pos_of_5, '3');
+						}
+					}
+					wp_name.Append("N");
+					wp_name.Append(lon.c_str());
+					wp_name.Replace(".", "");
+					wp_name.Append("W");
+
+					dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = wp_name;
+					waypoint_index++;
+					continue;
+				}
+			}
+			dta->m_pNats[NATcnt].WPCount = waypoint_index;
+			NATcnt++;
+		}
+	}
+
+	// =========================================================================
+	// FINAL WRAP-UP (Runs for both engines)
+	// =========================================================================
+	if (missingFixesDetected) {
+		euroNatPlugin->DisplayUserMessage("euroNAT", "Warning", "Some track waypoints were missing from ISEC.txt and skipped. See euroNAT.log.", true, true, false, false, false);
 	}
 
 	*dta->m_pNatCount = NATcnt;
-
 	NATData::AddConcordTracks(dta);
-
 	NATShow::Loading = false;
 	return 0;
 }
+
 
 bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
 	TCHAR dllpath[2048];
@@ -451,6 +639,12 @@ bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
 					fstream wpfile(isecfilename.Left(isecfilename.ReverseFind('\\') + 1) + "waypoints.txt", fstream::app);
 					wpfile << name << "\t" << lat << "\t" << lon << endl;
 					wpfile.close();
+
+					// ADDED: Log successfully resolved waypoints
+					CString logMsg;
+					logMsg.Format("Resolved named fix '%s' via ISEC.txt [Lat: %s, Lon: %s] and cached to waypoints.txt.",
+						(LPCTSTR)wp, lat.c_str(), lon.c_str());
+					LogToFile("INFO", logMsg);
 
 					return true;
 				}

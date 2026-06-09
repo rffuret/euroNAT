@@ -8,6 +8,8 @@
 #include "NATShow.h"
 #include "NATData.h"
 
+// 0 = FAA JSON (Default), 1 = VATSIM NatTrak
+int g_NatSource = 0;
 
 // euroNatOptions dialog
 
@@ -43,7 +45,6 @@ void euroNatOptions::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MFCCOLORBUTTON_CONC, m_colorbtnConcorde);
 }
 
-
 BEGIN_MESSAGE_MAP(euroNatOptions, CDialogEx)
 	ON_BN_CLICKED(IDOK, &euroNatOptions::OnBnClickedOk)
 	ON_BN_CLICKED(IDC_BUTTON_GET_NAT_DATA, &euroNatOptions::OnBnClickedGetNatData)
@@ -59,6 +60,7 @@ BEGIN_MESSAGE_MAP(euroNatOptions, CDialogEx)
 	ON_BN_CLICKED(IDC_CHECK_ANTI_ALIASED, &euroNatOptions::OnBnClickedCheckAntiAliased)
 	ON_BN_CLICKED(IDC_CHECK_CONCORD, &euroNatOptions::OnBnClickedCheckConcordTracks)
 	ON_CBN_SELCHANGE(IDC_COMBO_LINESTYLE, &euroNatOptions::OnCbSelChangedLinestyle)
+	ON_BN_CLICKED(IDC_TOGGLE_SOURCE, &euroNatOptions::OnBnClickedToggleSource)
 END_MESSAGE_MAP()
 
 
@@ -174,3 +176,24 @@ BOOL euroNatOptions::OnInitDialog()
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// EXCEPTION: OCX Property Pages should return FALSE
 }
+
+void euroNatOptions::OnBnClickedToggleSource()
+{
+	CString currentText;
+	GetDlgItemText(IDC_TOGGLE_SOURCE, currentText);
+
+	if (currentText == _T("FAA")) {
+		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("natTrak"));
+		g_NatSource = 1; // Switch state to VATSIM
+	}
+	else {
+		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("FAA"));
+		g_NatSource = 0; // Switch state to FAA
+	}
+
+	// Automatically spins up the background thread using the newly selected engine source
+	if (NATData::LastInstance != NULL) {
+		NATData::LastInstance->Refresh();
+	}
+}
+
