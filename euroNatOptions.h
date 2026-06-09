@@ -19,6 +19,8 @@ protected:
 
 	void LoadValues();
 
+	afx_msg void OnBnClickedToggleSource();
+
 	DECLARE_MESSAGE_MAP()
 public:
 	CButton m_chkShowLetters;

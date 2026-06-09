@@ -59,6 +59,7 @@ BEGIN_MESSAGE_MAP(euroNatOptions, CDialogEx)
 	ON_BN_CLICKED(IDC_CHECK_ANTI_ALIASED, &euroNatOptions::OnBnClickedCheckAntiAliased)
 	ON_BN_CLICKED(IDC_CHECK_CONCORD, &euroNatOptions::OnBnClickedCheckConcordTracks)
 	ON_CBN_SELCHANGE(IDC_COMBO_LINESTYLE, &euroNatOptions::OnCbSelChangedLinestyle)
+	ON_BN_CLICKED(IDC_TOGGLE_SOURCE, &euroNatOptions::OnBnClickedToggleSource)
 END_MESSAGE_MAP()
 
 
@@ -173,4 +174,18 @@ BOOL euroNatOptions::OnInitDialog()
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// EXCEPTION: OCX Property Pages should return FALSE
+}
+
+void euroNatOptions::OnBnClickedToggleSource()
+{
+	CString currentText;
+	GetDlgItemText(IDC_TOGGLE_SOURCE, currentText);
+
+	// If it currently says FAA, flip it to VATSIM, and vice versa
+	if (currentText == _T("FAA")) {
+		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("NATTRAK"));
+	}
+	else {
+		SetDlgItemText(IDC_TOGGLE_SOURCE, _T("FAA"));
+	}
 }
