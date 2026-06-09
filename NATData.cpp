@@ -6,6 +6,8 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include "json.hpp"
+using json = nlohmann::json;
 using namespace std;
 
 NATData::NATWorkerCont NATData::NATWorkerData;
@@ -14,7 +16,7 @@ CPlugIn* euroNatPlugin;
 
 //Use only one of the below links (if prod, always the first)
 //Remote FAA link to capture NAT Message
-CString natURL = "https://notams.aim.faa.gov/nat.html";
+CString natURL = "https://nms.aim.faa.gov/datanat/nat.json";
 //Local link to fake message for test purpose
 //CString natURL = "";
 
@@ -107,6 +109,38 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 		return -1;
 	}
 	grab.Close();
+
+	// -------------------------------------------------------------------------
+	// NEW JSON WRAPPER EXTRACTOR
+	// -------------------------------------------------------------------------
+	std::string jsonRawSource((LPCTSTR)response);
+	std::string stitchedLegacyText = "";
+
+	try {
+		auto parsedJson = json::parse(jsonRawSource);
+
+		if (parsedJson.is_array()) {
+			// Iterate through all parts (Part 1, Part 2, etc.) and append text
+			for (const auto& part : parsedJson) {
+				if (part.contains("condition_message") && part["condition_message"].is_string()) {
+					stitchedLegacyText += part["condition_message"].get<std::string>();
+					stitchedLegacyText += "\r\n"; // Ensure clean spacing between parts
+				}
+			}
+		}
+	}
+	catch (const std::exception& e) {
+		CString errMessage;
+		errMessage.Format("JSON Parsing Exception: %s", e.what());
+		euroNatPlugin->DisplayUserMessage("euroNAT", "Error", errMessage, true, true, true, true, true);
+		NATShow::Loading = false;
+		return -1;
+	}
+
+	// Re-assign our clean, stitched text back into the original MFC response variable
+	response = stitchedLegacyText.c_str();
+	response.Replace("\r", "");
+	// -------------------------------------------------------------------------
 
 	// Check for 'NO DATA IS ACTIVE'
 	if (response.Find("NO DATA IS ACTIVE") >= 0) {
