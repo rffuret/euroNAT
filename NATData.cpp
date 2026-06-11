@@ -89,6 +89,65 @@ void LogToFile(const CString& level, const CString& message) {
 	}
 }
 
+void LogPayloadToFile(const CString& payload) {
+	HMODULE hMod = GetModuleHandle(_T("euroNAT.dll"));
+	if (!hMod) return;
+
+	TCHAR dllpath[MAX_PATH];
+	GetModuleFileName(hMod, dllpath, MAX_PATH);
+	CString logPath(dllpath);
+	logPath = logPath.Left(logPath.ReverseFind(_T('\\')) + 1) + _T("FetchedData.log");
+
+	std::vector<std::string> lines;
+	std::ifstream inFile;
+	inFile.open((LPCTSTR)logPath);
+	std::string line;
+	std::vector<size_t> downloadMarkers;
+
+	// 1. Read existing file and track the line numbers where downloads start
+	if (inFile.is_open()) {
+		while (std::getline(inFile, line)) {
+			if (line.find("=== DOWNLOAD START") != std::string::npos) {
+				downloadMarkers.push_back(lines.size());
+			}
+			lines.push_back(line);
+		}
+		inFile.close();
+	}
+
+	// 2. Truncate oldest downloads if we already have 8 or more entries.
+	// Keeping the last 7 means the upcoming append will make exactly 8.
+	if (downloadMarkers.size() >= 8) {
+		size_t keepFromLine = downloadMarkers[downloadMarkers.size() - 7];
+		std::ofstream outFile;
+		outFile.open((LPCTSTR)logPath, std::ios::trunc);
+		if (outFile.is_open()) {
+			for (size_t i = keepFromLine; i < lines.size(); ++i) {
+				outFile << lines[i] << "\n";
+			}
+			outFile.close();
+		}
+	}
+
+	// 3. Append the new incoming payload block with timestamp and source header
+	std::ofstream logFile;
+	logFile.open((LPCTSTR)logPath, std::ios::app);
+	if (logFile.is_open()) {
+		SYSTEMTIME st;
+		GetLocalTime(&st);
+		char timestamp[64];
+		sprintf_s(timestamp, "=== DOWNLOAD START [%04d-%02d-%02d %02d:%02d:%02d] ===",
+			st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+		logFile << timestamp << "\n";
+		logFile << "Source: " << (g_NatSource == 1 ? "VATSIM natTrak API (v2)" : "FAA System JSON") << "\n";
+		logFile << "------------------------------------------------------------\n";
+		logFile << (LPCTSTR)payload << "\n";
+		logFile << "=== DOWNLOAD END ===\n\n" << std::endl;
+		logFile.close();
+	}
+}
+
 NATData::NATWorkerCont NATData::NATWorkerData;
 NATData * NATData::LastInstance = NULL;
 CPlugIn* euroNatPlugin;
@@ -239,6 +298,11 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 	}
 	grab.Close();
 
+	// ==========================================
+	// ADDED: Log the raw payload from this fetch cycle
+	// ==========================================
+	LogPayloadToFile(response);
+
 
 	if (g_NatSource == 1) {
 		LogToFile("INFO", "Loading natTrak Data");
@@ -317,16 +381,37 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 					int slashIdx = wp.Find('/');
 					if (slashIdx >= 0) {
+						// This is a dynamic coordinate fix token like "61/20" or "5930/30"
 						CString latStr = wp.Left(slashIdx);
 						CString lonStr = wp.Mid(slashIdx + 1);
 
-						double latitude = _ttof(latStr);
-						double longitude = _ttof(lonStr);
-						longitude = -longitude;
+						// Parse Latitude (Handles whole degrees "61" or degrees+minutes "5930")
+						double latitude = 0.0;
+						if (latStr.GetLength() > 2) {
+							double deg = _ttof(latStr.Left(2));
+							double min = _ttof(latStr.Mid(2));
+							latitude = deg + (min / 60.0); // Convert minutes to decimal (e.g., 30/60 = 0.5)
+						}
+						else {
+							latitude = _ttof(latStr);
+						}
+
+						// Parse Longitude (Handles whole degrees "30" or degrees+minutes "3030" just in case)
+						double longitude = 0.0;
+						if (lonStr.GetLength() > 2) {
+							double deg = _ttof(lonStr.Left(2));
+							double min = _ttof(lonStr.Mid(2));
+							longitude = deg + (min / 60.0);
+						}
+						else {
+							longitude = _ttof(lonStr);
+						}
+						longitude = -longitude; // Convert West longitudes to negative coordinates
 
 						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Latitude = latitude;
 						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Longitude = longitude;
 
+						// Apply tracking names for EuroScope representation (e.g., Short: "30W", Full: "5930N30W")
 						dta->m_pNats[NATcnt].Waypoints[waypoint_index].ShortName = lonStr + _T("W");
 						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = latStr + _T("N") + lonStr + _T("W");
 						waypoint_index++;
@@ -342,7 +427,7 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 							waypoint_index++;
 						}
 						else {
-							// ENGINE A ADDITION: Log missing named fixes safely here
+							//Log missing named fixes safely here
 							CString errorMsg;
 							errorMsg.Format("VATSIM Track %c: Fix %s not found in ISEC.txt or out of bounds.", dta->m_pNats[NATcnt].Letter, (LPCTSTR)wp);
 							LogToFile("WARNING", errorMsg);
@@ -449,7 +534,7 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 
 		bool isecExists = (GetFileAttributes(isecPath) != INVALID_FILE_ATTRIBUTES);
 		if (!isecExists) {
-			LogToFile("ERROR", "ISEC.txt is missing from the plugin directory! Named fix extraction will fail.");
+			LogToFile("ERROR", "ISEC.txt is missing from the plugin directory! Named fix extraction might fail.");
 		}
 		string res((LPCTSTR)response);
 		const regex track_regex("([a-zA-Z]\\s+)([a-zA-Z]{5}\\s+)*(\\d{2,}\\/\\d{2,}\\s+)*(\\d{2,}\\/\\d{2,})*([a-zA-Z]{5}\\s+)*([a-zA-Z]{5})*\\nEAST LVLS .+\\nWEST LVLS .+\\n");
@@ -520,7 +605,6 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 							wp_map.insert(pair<CString, NATWaypoint>(natwp.Name, natwp));
 						}
 						else {
-							// ENGINE B FIXED: Squelch loop popup, pipe to file instead
 							CString errorMsg;
 							errorMsg.Format("FAA Track %c: Fix %s not found in ISEC.txt or out of bounds.", dta->m_pNats[NATcnt].Letter, (LPCTSTR)wp);
 							LogToFile("WARNING", errorMsg);
@@ -531,60 +615,57 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 				}
 
 				if (isdigit(nat[cursor])) {
-					string lat;
-					char lat_decimal = 'X';
-					lat = nat.Mid(cursor, 2);
-					cursor += 2;
-					lat.operator+=('.');
+					int slashIdx = nat.Find('/', cursor);
+					if (slashIdx >= 0) {
+						// Extract raw latitude string up to the slash
+						CString latStr = nat.Mid(cursor, slashIdx - cursor);
 
-					while (isdigit(nat[cursor])) {
-						char current_digit = nat[cursor];
-						if (current_digit == '3') {
-							lat_decimal = current_digit;
-							current_digit = '5';
+						// Extract raw longitude string (all digits following the slash)
+						int lonStart = slashIdx + 1;
+						int lonEnd = lonStart;
+						while (lonEnd < nat.GetLength() && isdigit(nat[lonEnd])) {
+							lonEnd++;
 						}
-						lat = lat.operator+=(current_digit);
-						cursor++;
-					}
+						CString lonStr = nat.Mid(lonStart, lonEnd - lonStart);
 
-					cursor++;
-					string lon;
-					lon = nat.Mid(cursor, 2);
-					cursor += 2;
-					lon.operator+=('.');
-					while (isdigit(nat[cursor])) {
-						lon = lon.operator+=(nat[cursor]);
-						cursor++;
-					}
+						// Advance main loop cursor past this coordinate block cleanly
+						cursor = lonEnd;
 
-					double latitude = stod(lat);
-					double longitude = stod(lon);
-					longitude = longitude / -1;
-
-					dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Latitude = latitude;
-					dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Longitude = longitude;
-
-					CString wp_name = lon.c_str();
-					wp_name.Append("W");
-					wp_name.Replace(".", "");
-					dta->m_pNats[NATcnt].Waypoints[waypoint_index].ShortName = wp_name;
-
-					wp_name = lat.c_str();
-					wp_name.Replace(".", "");
-					if (lat_decimal == '3') {
-						int pos_of_5 = wp_name.Find('5', 2);
-						if (pos_of_5 != -1) {
-							wp_name.SetAt(pos_of_5, '3');
+						// Parse Latitude mathematically (Handles "55" or "5930")
+						double latitude = 0.0;
+						if (latStr.GetLength() > 2) {
+							double deg = _ttof(latStr.Left(2));
+							double min = _ttof(latStr.Mid(2));
+							latitude = deg + (min / 60.0); // True decimal conversion
 						}
-					}
-					wp_name.Append("N");
-					wp_name.Append(lon.c_str());
-					wp_name.Replace(".", "");
-					wp_name.Append("W");
+						else {
+							latitude = _ttof(latStr);
+						}
 
-					dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = wp_name;
-					waypoint_index++;
-					continue;
+						// Parse Longitude mathematically (Handles "20" or "2030")
+						double longitude = 0.0;
+						if (lonStr.GetLength() > 2) {
+							double deg = _ttof(lonStr.Left(2));
+							double min = _ttof(lonStr.Mid(2));
+							longitude = deg + (min / 60.0);
+						}
+						else {
+							longitude = _ttof(lonStr);
+						}
+						longitude = -longitude; // Convert West longitudes to negative coordinates
+
+						// Assign position coordinates
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Latitude = latitude;
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Position.m_Longitude = longitude;
+
+						// Construct EuroScope tracking identifiers directly from raw strings
+						// e.g., ShortName = "30W", Name = "5930N30W"
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].ShortName = lonStr + _T("W");
+						dta->m_pNats[NATcnt].Waypoints[waypoint_index].Name = latStr + _T("N") + lonStr + _T("W");
+
+						waypoint_index++;
+						continue;
+					}
 				}
 			}
 			dta->m_pNats[NATcnt].WPCount = waypoint_index;
@@ -629,7 +710,7 @@ bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
 				double lonVal = stod(lon);
 
 				// North Atlantic Bounding Box
-				if ((latVal >= 30.0 && latVal <= 90.0) && (lonVal >= -70.0 && lonVal <= -1.0)) {
+				if ((latVal >= 30.0 && latVal <= 90.0) && (lonVal >= -65.0 && lonVal <= 1.0)) {
 					natwp->Name = name.c_str();
 					natwp->ShortName = name.c_str();
 					natwp->Position.m_Latitude = latVal;
@@ -642,7 +723,7 @@ bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
 
 					// ADDED: Log successfully resolved waypoints
 					CString logMsg;
-					logMsg.Format("Resolved named fix '%s' via ISEC.txt [Lat: %s, Lon: %s] and cached to waypoints.txt.",
+					logMsg.Format("Found fix '%s' via ISEC.txt [Lat: %s, Lon: %s] and added to waypoints.txt.",
 						(LPCTSTR)wp, lat.c_str(), lon.c_str());
 					LogToFile("INFO", logMsg);
 
@@ -658,7 +739,6 @@ bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
 
 void NATData::AddConcordTracks(NATWorkerCont* dta) {
 	int i = *dta->m_pNatCount;
-	*dta->m_pNatCount += 5;
 
 	// SM
 	dta->m_pNats[i].Concorde = true;
@@ -805,9 +885,10 @@ void NATData::AddConcordTracks(NATWorkerCont* dta) {
 	dta->m_pNats[i].Waypoints[6].Position.m_Latitude = 42;
 	dta->m_pNats[i].Waypoints[6].Position.m_Longitude = -60;
 	dta->m_pNats[i].WPCount = 7;
+	i++; // Increment final tracking state properly
 
-
-
+	// Assign the absolute final count dynamically with no buffer padding gaps
+	*dta->m_pNatCount = i;
 }
 
 
