@@ -303,6 +303,17 @@ UINT NATData::FetchDataWorker(LPVOID pvar) {
 	// ==========================================
 	LogPayloadToFile(response);
 
+	// =========================================================================
+	// Strip trailing network buffer corruption/garbage
+	// =========================================================================
+	int lastBracket = response.ReverseFind(']');
+	int lastBrace = response.ReverseFind('}');
+	int jsonEndIdx = (lastBracket > lastBrace) ? lastBracket : lastBrace;
+
+	if (jsonEndIdx >= 0) {
+		response = response.Left(jsonEndIdx + 1);
+	}
+
 
 	if (g_NatSource == 1) {
 		LogToFile("INFO", "Loading natTrak Data");
