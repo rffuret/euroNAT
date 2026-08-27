@@ -4,10 +4,10 @@
 #include "resource.h"
 
 // TODO: Update version number for new releases (format x.x.x)
-const double this_version_number = 2.2;
-// INT_MAX if not in beta
+const double this_version_number = 2.3;
+// 0 if not in beta or 1 if in beta
 const unsigned int this_beta_version = 0;
-const char * version_string = "2.2";
+const char * version_string = "2.3";
 
 const CString pluginversion_url = "https://raw.githubusercontent.com/rffuret/euroNAT/master/pluginversion.txt";
 
@@ -171,7 +171,7 @@ void euroNatPlugin::CheckVersion(void) {
 			message.Format("There is a new beta (v%g beta %d) avaliable at github.com/rffuret/euroNAT/releases.", new_version_number, new_beta_version);
 			DisplayUserMessage("euroNAT", "Info", message, true, true, false, false, false);
 
-		} else if (this_beta_version < INT_MAX && new_beta_version == 0) {
+		} else if (this_beta_version > 0 && new_beta_version == 0) {
 			CString message;
 			message.Format("There is a new version (v%g) avaliable at github.com/rffuret/euroNAT/releases.", new_version_number);
 			DisplayUserMessage("euroNAT", "Info", message, true, true, false, true, false);

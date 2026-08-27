@@ -721,7 +721,7 @@ bool NATData::checkISEC(CString wp, NATWaypoint* natwp) {
 				double lonVal = stod(lon);
 
 				// North Atlantic Bounding Box
-				if ((latVal >= 30.0 && latVal <= 90.0) && (lonVal >= -65.0 && lonVal <= 1.0)) {
+				if ((latVal >= 30.0 && latVal <= 90.0) && (lonVal >= -70.0 && lonVal <= 1.0)) {
 					natwp->Name = name.c_str();
 					natwp->ShortName = name.c_str();
 					natwp->Position.m_Latitude = latVal;
